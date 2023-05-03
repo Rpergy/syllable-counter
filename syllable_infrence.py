@@ -1,40 +1,42 @@
 import csv
 import torch
 import torch.nn as nn
-import random
 
 ## HYPERPARAMETERS ##
 lr = 0.05
-lr_decay = 0.2
-epochs = 1500
+lr_decay = 0.02
+epochs = 200
+batch_size = 7000
 
 model_architecture = nn.Sequential(
-                     nn.Linear(28, 50),
+                     nn.Linear(28, 30),
+                     nn.Linear(30, 50),
+                     nn.ReLU(),
+                     nn.Linear(50, 80),
+                     nn.ReLU(),
+                     nn.Linear(80, 80),
+                     nn.ReLU(),
+                     nn.Linear(80, 50),
                      nn.ReLU(),
                      nn.Linear(50, 50),
                      nn.ReLU(),
                      nn.Linear(50, 50),
                      nn.ReLU(),
-                     nn.Linear(50, 30),
-                     nn.ReLU(),
-                     nn.Linear(30, 20),
-                     nn.ReLU(),
-                     nn.Linear(20, 10),
-                     nn.ReLU(),
-                     nn.Linear(10, 1)
+                     nn.Linear(50, 12),
                     )
+# ---------------------
 
 words = []
 syllables = []
 
-with open("phoneticDictionary.csv", "r") as file:
+with open("phoneticDictionary.csv", "r") as file: # read data from file
     csvFile = csv.reader(file)
 
     for lines in csvFile:
         words.append(lines[1])
         syllables.append(lines[3])
 
-vocabulary = {
+vocabulary = { # list of vocabulary used in words
     'a': 0.0,
     'b': 1.0,
     'c': 2.0,
@@ -64,17 +66,14 @@ vocabulary = {
     '.': 26.0
 }
 
-value = [i for i in vocabulary if vocabulary[i]==3.0]
-value[0]
-
-def encode(input):
+def encode(input): # encode features into list of integers
     output = []
     for letter in input:
         output.append(vocabulary[letter])
         
     return output
 
-def decode(input):
+def decode(input): # decode features into a string
     output = ""
     for val in input:
         output += [i for i in vocabulary if vocabulary[i]==val][0]
@@ -84,24 +83,24 @@ def decode(input):
 features = []
 labels = []
 
-for word in words:
+for word in words: # add encoded word to features list
     features.append(encode(word))
 
 longest_len = 0
 longest_index = 0
 
-for word in range(len(features)):
+for word in range(len(features)): # find length/index of longest word
     if len(features[word]) > longest_len:
         longest_len = len(features[word])
         longest_index = word
 
-for i in range(len(features)):
+for i in range(len(features)): # add a list of periods to the end of each word in order to maintain constant word length
     difference = longest_len - len(features[i])
     features[i].extend([26.0 for i in range(difference)])
 
-labels = [float(i) for i in syllables]
+labels = [nn.functional.one_hot(torch.tensor(int(label), dtype=torch.int64), 12).view(12).tolist() for label in syllables] # converts labels to one-hot vectors for inference 
 
-class Model(nn.Module):
+class Model(nn.Module): # define network 
     def __init__(self):
         super().__init__()
         self.net = model_architecture
@@ -117,34 +116,43 @@ print("Training Model...")
 initial_lr = lr
 
 for epoch in range(epochs):
-    x = torch.tensor(features[random.randint(0, len(features))], dtype=torch.float32)
-    y = torch.tensor(labels[random.randint(0, len(labels))], dtype=torch.float32).view(1)
+    nums = torch.randint(0, len(features), (1, batch_size)).view(batch_size)
+    x = torch.tensor([features[i] for i in nums], dtype=torch.float32)
+    y = torch.tensor([labels[i] for i in nums], dtype=torch.float32)
 
     optimizer.zero_grad()
     output = m(x)
-
 
     mse_loss = nn.MSELoss()
     loss = mse_loss(output, y)
     loss.backward()
     optimizer.step()
 
-    if epoch % 100 == 0:
-        print(f"Model Loss in Epoch {epoch}: {loss.item()} Learning Rate: {lr}")
+    print(f"Loss in Epoch {epoch}: {loss.item():0.4f} Learning Rate: {lr}")
     
     lr = (1 / (1 + lr_decay * epoch)) * initial_lr
-    optimizer.param_groups[0]['lr'] = lr
+    optimizer.param_groups[0]['lr'] = lr # decrease learning rate by the decay amount
 
 while True:
-    wordInput = input("(Type ':exit' to exit) Enter a word: ")
-
-    if wordInput == ":exit": break
-
-    word = encode(wordInput)
-
-    difference = longest_len - len(word)
-    word.extend([26.0 for i in range(difference)])
-
     with torch.no_grad():
+        wordInput = input("(Type ':exit' to exit) Enter a word: ")
+
+        if wordInput == ":exit": break
+
+        word = encode(wordInput)
+
+        difference = longest_len - len(word)
+        word.extend([26.0 for i in range(difference)])
+
         output = m(torch.tensor(word))
-        print(f"{wordInput} has {round(output.item())} syllables (Acutal Inference: {output.item()} syllables)\n")
+
+        highest_val = 0
+        highest_index = 0
+
+        for i in range(len(output)): # finds highest percentage 
+            if output[i] > highest_val:
+                highest_val = output[i]
+                highest_index = i
+
+        print(output)
+        print(f"{highest_index} syllables, {highest_val.item() * 100:0.2f}% sure")
